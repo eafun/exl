@@ -35,16 +35,16 @@ func NewWriter(options ...xlsx.FileOption) *Writer {
 }
 
 // Write or append the param data into sheet
-func (w *Writer) Write(sheet string, data any) error {
+func (w *Writer) Write(sheet string, data any, columnNames ...string) error {
 	if sht, ok := w.file.Sheet[sheet]; ok {
 		w.reset()
-		return w.writeSheet(sht, data)
+		return w.writeSheet(sht, data, columnNames...)
 	}
 	if sht, err := w.file.AddSheet(sheet); err != nil {
 		return err
 	} else {
 		w.reset()
-		return w.writeSheet(sht, data)
+		return w.writeSheet(sht, data, columnNames...)
 	}
 }
 
@@ -54,32 +54,41 @@ func (w *Writer) SaveTo(path string) (err error) { return w.file.Save(path) }
 // WriteTo the buffered binary into new writer
 func (w *Writer) WriteTo(dw io.Writer) (n int, err error) { return 0, w.file.Write(dw) }
 
-func (w *Writer) writeSheet(sheet *xlsx.Sheet, data any) (err error) {
+func (w *Writer) writeSheet(sheet *xlsx.Sheet, data any, columnNames ...string) (err error) {
 	value := w.deepValue(reflect.ValueOf(data))
 	vk := value.Type().Kind()
 	switch vk {
 	case reflect.Array, reflect.Slice:
-		w.writeArrayOrSlice(sheet, value)
+		w.writeArrayOrSlice(sheet, value, columnNames...)
 		return nil
 	}
 	return errors.New(fmt.Sprintf("not supported type: %v", vk))
 }
 
-func (w *Writer) writeArrayOrSlice(sheet *xlsx.Sheet, value reflect.Value) {
+func (w *Writer) writeArrayOrSlice(sheet *xlsx.Sheet, value reflect.Value, columnNames ...string) {
 	arrLen := value.Len()
 	var header *reflect.Value
 	if arrLen > 0 {
 		dv := w.deepValue(value.Index(0))
 		header = &dv
 	}
-	w.setHeaderRow(sheet.AddRow(), w.deepType(value.Type().Elem()), header)
+	w.setHeaderRow(sheet.AddRow(), w.deepType(value.Type().Elem()), header, columnNames...)
 	for i := 0; i < arrLen; i++ {
 		w.setDataRow(sheet.AddRow(), w.deepValue(value.Index(i)))
 	}
 }
 
-func (w *Writer) setHeaderRow(row *xlsx.Row, typ reflect.Type, value *reflect.Value) {
+func (w *Writer) setHeaderRow(row *xlsx.Row, typ reflect.Type, value *reflect.Value, columnNames ...string) {
 	vk := typ.Kind()
+
+	if len(columnNames) > 0 {
+		for _, column := range columnNames {
+			mk := w.deepValue(reflect.ValueOf(column))
+			w.mapHeader = append(w.mapHeader, mk)
+			w.addCell(row, mk)
+		}
+		return
+	}
 
 	if vk == reflect.Map && value != nil {
 		for _, _mk := range value.MapKeys() {
